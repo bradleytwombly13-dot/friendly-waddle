@@ -26,6 +26,7 @@
 
   #stage{position:fixed;inset:0;}
   #canvasWrap{position:absolute;inset:0;cursor:crosshair;}
+  #gridCanvas{image-rendering:pixelated;}
   canvas{display:block;position:absolute;top:0;left:0;}
 
   header{
@@ -280,6 +281,7 @@ let pendingHitBlock = null, pendingStartClient = null;
 const wrap = document.getElementById('canvasWrap');
 const canvas = document.getElementById('gridCanvas');
 const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
 const imageCache = new Map();
 
 function findBlockAt(px, py){

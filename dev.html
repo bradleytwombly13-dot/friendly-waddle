@@ -107,6 +107,7 @@
     </div>
     <h2>Claimed blocks <span class="mono" style="font-weight:400;font-size:11px;color:#7A7F84;" id="boughtCount"></span></h2>
     <div class="section" style="border-bottom:none;padding-bottom:6px;">
+      <button id="exportBtn" style="width:100%;padding:8px;background:transparent;border:1px solid #4A7A4A;color:#3A6A3A;border-radius:2px;font-weight:600;font-size:12px;cursor:pointer;margin-bottom:8px;">Export full canvas as PNG</button>
       <button id="resetBtn" style="width:100%;padding:8px;background:transparent;border:1px solid #C7573F;color:#C4451F;border-radius:2px;font-weight:600;font-size:12px;cursor:pointer;">Reset everything</button>
       <div style="font-size:11px;color:#7A7F84;margin-top:6px;">Every claim goes live immediately, first come first served. Use this to wipe the canvas and start over.</div>
     </div>
@@ -419,6 +420,48 @@ document.getElementById('resetBtn').onclick = async ()=>{
     body:JSON.stringify({action:'reset-all'})
   });
   loadAll();
+};
+
+document.getElementById('exportBtn').onclick = async ()=>{
+  const btn = document.getElementById('exportBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  try{
+    const CANVAS_SIZE = 10000;
+    btn.textContent = 'Rendering...';
+    const out = document.createElement('canvas');
+    out.width = CANVAS_SIZE; out.height = CANVAS_SIZE;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingEnabled = false;
+    octx.fillStyle = '#ffffff';
+    octx.fillRect(0,0,CANVAS_SIZE,CANVAS_SIZE);
+    let done = 0;
+    for(const b of allBlocks){
+      if(b.image){
+        await new Promise((resolve)=>{
+          const img = new Image();
+          img.onload = ()=>{ octx.drawImage(img, b.x, b.y, b.w, b.h); resolve(); };
+          img.onerror = resolve;
+          img.src = b.image;
+        });
+      }
+      done++;
+      btn.textContent = `Rendering... (${done}/${allBlocks.length})`;
+    }
+    btn.textContent = 'Preparing download...';
+    out.toBlob((blob)=>{
+      if(!blob){ alert('Export failed — canvas may be too large for this browser/device.'); btn.disabled=false; btn.textContent=originalText; return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'pixel-canvas-export.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      btn.disabled = false; btn.textContent = originalText;
+    }, 'image/png');
+  }catch(e){
+    alert('Export failed: ' + e.message);
+    btn.disabled = false; btn.textContent = originalText;
+  }
 };
 
 function showGate(err){
