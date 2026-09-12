@@ -1,33 +1,23 @@
+import {
+  jsonResponse,
+  badRequest,
+  notFound,
+  listAllKeys,
+  getCanvas,
+  getSessionUser,
+  getUserRecord,
+  putUserRecord,
+  STARTER_CANVASES,
+} from '../../../_lib/common.js';
+
 const GRID = 1;
-const CANVAS_SIZE = 10000;
 const MAX_IMAGE_LEN = 3_000_000;
 const MAX_URL_LEN = 500;
 const MAX_TAGLINE_LEN = 200;
 const MAX_EMAIL_LEN = 200;
 
-function jsonResponse(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-function badRequest(msg) {
-  return jsonResponse({ error: msg }, 400);
-}
-
-async function listAllKeys(kv) {
-  let keys = [];
-  let cursor;
-  do {
-    const res = await kv.list({ cursor });
-    keys = keys.concat(res.keys);
-    cursor = res.list_complete ? undefined : res.cursor;
-  } while (cursor);
-  return keys;
-}
-
-async function allBlocks(kv) {
-  const keys = await listAllKeys(kv);
+async function allBlocks(kv, canvasId) {
+  const keys = await listAllKeys(kv, `block:${canvasId}:`);
   const values = await Promise.all(keys.map((k) => kv.get(k.name, 'json')));
   return values.filter(Boolean);
 }
@@ -50,13 +40,36 @@ function validLink(url) {
 }
 
 export async function onRequestGet(context) {
-  const { env } = context;
-  const blocks = (await allBlocks(env.BLOCKS_KV)).filter((b) => b.status === 'confirmed').map(toPublic);
-  return jsonResponse({ blocks });
+  const { env, params } = context;
+  const canvasId = params.id;
+  const canvas = await getCanvas(env.BLOCKS_KV, canvasId);
+  if (!canvas) return notFound('Canvas not found');
+
+  const blocks = (await allBlocks(env.BLOCKS_KV, canvasId))
+    .filter((b) => b.status === 'confirmed')
+    .map(toPublic);
+
+  return jsonResponse({
+    canvas: {
+      id: canvas.id,
+      name: canvas.name,
+      description: canvas.description,
+      width: canvas.width,
+      height: canvas.height,
+      isStarter: !!canvas.isStarter,
+      ownerSub: undefined, // never sent; listed here only to document it's excluded
+      theme: canvas.theme || null,
+    },
+    blocks,
+  });
 }
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, params } = context;
+  const canvasId = params.id;
+  const canvas = await getCanvas(env.BLOCKS_KV, canvasId);
+  if (!canvas) return notFound('Canvas not found');
+
   let body;
   try {
     body = await request.json();
@@ -73,7 +86,7 @@ export async function onRequestPost(context) {
   if (x % GRID || y % GRID || w % GRID || h % GRID || w <= 0 || h <= 0) {
     return badRequest('Invalid selection');
   }
-  if (x + w > CANVAS_SIZE || y + h > CANVAS_SIZE) {
+  if (x + w > canvas.width || y + h > canvas.height) {
     return badRequest('Out of bounds');
   }
   if (typeof image !== 'string' || !image.startsWith('data:image/')) {
@@ -92,7 +105,7 @@ export async function onRequestPost(context) {
     return badRequest('Email is too long');
   }
 
-  const existing = await allBlocks(env.BLOCKS_KV);
+  const existing = await allBlocks(env.BLOCKS_KV, canvasId);
   const overlap = existing.some(
     (b) => x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + h > b.y
   );
@@ -100,10 +113,33 @@ export async function onRequestPost(context) {
     return jsonResponse({ error: 'That space overlaps a claimed block' }, 409);
   }
 
+  const session = await getSessionUser(request, env);
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   // Every claim goes live immediately — first come, first served, no approval step.
-  const record = { id, x, y, w, h, image, url: url || '', tagline: tagline || '', email: email || '', status: 'confirmed', createdAt: new Date().toISOString() };
-  await env.BLOCKS_KV.put(id, JSON.stringify(record));
+  const record = {
+    id,
+    x,
+    y,
+    w,
+    h,
+    image,
+    url: url || '',
+    tagline: tagline || '',
+    email: email || '',
+    status: 'confirmed',
+    createdAt: new Date().toISOString(),
+    ownerSub: session ? session.sub : null,
+  };
+  await env.BLOCKS_KV.put(`block:${canvasId}:${id}`, JSON.stringify(record));
+
+  // Track starter-canvas quest progress for signed-in users.
+  if (session && STARTER_CANVASES.some((c) => c.id === canvasId)) {
+    const userRecord = await getUserRecord(env.BLOCKS_KV, session.sub);
+    if (!userRecord.claimedStarters.includes(canvasId)) {
+      userRecord.claimedStarters = [...userRecord.claimedStarters, canvasId];
+      await putUserRecord(env.BLOCKS_KV, session.sub, userRecord);
+    }
+  }
 
   return jsonResponse({ ok: true, id });
 }

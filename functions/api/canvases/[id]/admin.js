@@ -1,34 +1,11 @@
+import { jsonResponse, badRequest, unauthorized, notFound, listAllKeys, getCanvas } from '../../../_lib/common.js';
+
 const GRID = 1;
-const CANVAS_SIZE = 10000;
 const MAX_URL_LEN = 500;
 const MAX_TAGLINE_LEN = 200;
 
-function jsonResponse(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-function badRequest(msg) {
-  return jsonResponse({ error: msg }, 400);
-}
-function unauthorized() {
-  return jsonResponse({ error: 'Unauthorized' }, 401);
-}
-
-async function listAllKeys(kv) {
-  let keys = [];
-  let cursor;
-  do {
-    const res = await kv.list({ cursor });
-    keys = keys.concat(res.keys);
-    cursor = res.list_complete ? undefined : res.cursor;
-  } while (cursor);
-  return keys;
-}
-
-async function allBlocks(kv) {
-  const keys = await listAllKeys(kv);
+async function allBlocks(kv, canvasId) {
+  const keys = await listAllKeys(kv, `block:${canvasId}:`);
   const values = await Promise.all(keys.map((k) => kv.get(k.name, 'json')));
   return values.filter(Boolean);
 }
@@ -50,15 +27,21 @@ function validLink(url) {
 }
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { request, env, params } = context;
   if (!checkAuth(request, env)) return unauthorized();
-  const blocks = await allBlocks(env.BLOCKS_KV);
-  return jsonResponse({ blocks });
+  const canvasId = params.id;
+  const canvas = await getCanvas(env.BLOCKS_KV, canvasId);
+  if (!canvas) return notFound('Canvas not found');
+  const blocks = await allBlocks(env.BLOCKS_KV, canvasId);
+  return jsonResponse({ canvas, blocks });
 }
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, params } = context;
   if (!checkAuth(request, env)) return unauthorized();
+  const canvasId = params.id;
+  const canvas = await getCanvas(env.BLOCKS_KV, canvasId);
+  if (!canvas) return notFound('Canvas not found');
 
   let body;
   try {
@@ -69,12 +52,12 @@ export async function onRequestPost(context) {
 
   if (body.action === 'delete') {
     if (typeof body.id !== 'string' || !body.id) return badRequest('Missing id');
-    await env.BLOCKS_KV.delete(body.id);
+    await env.BLOCKS_KV.delete(`block:${canvasId}:${body.id}`);
     return jsonResponse({ ok: true });
   }
 
   if (body.action === 'reset-all') {
-    const keys = await listAllKeys(env.BLOCKS_KV);
+    const keys = await listAllKeys(env.BLOCKS_KV, `block:${canvasId}:`);
     await Promise.all(keys.map((k) => env.BLOCKS_KV.delete(k.name)));
     return jsonResponse({ ok: true, deleted: keys.length });
   }
@@ -84,7 +67,7 @@ export async function onRequestPost(context) {
     if (![x, y, w, h].every((n) => Number.isInteger(n) && n >= 0)) {
       return badRequest('Invalid coordinates');
     }
-    if (x % GRID || y % GRID || w % GRID || h % GRID || w <= 0 || h <= 0 || x + w > CANVAS_SIZE || y + h > CANVAS_SIZE) {
+    if (x % GRID || y % GRID || w % GRID || h % GRID || w <= 0 || h <= 0 || x + w > canvas.width || y + h > canvas.height) {
       return badRequest('Invalid block');
     }
     if (typeof image !== 'string' || !image.startsWith('data:image/')) {
@@ -100,7 +83,7 @@ export async function onRequestPost(context) {
     // unlike the public endpoint, it's intentionally allowed to overlap existing blocks.
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const record = { id, x, y, w, h, image, url: url || '', tagline: tagline || '', status: 'confirmed', createdAt: new Date().toISOString() };
-    await env.BLOCKS_KV.put(id, JSON.stringify(record));
+    await env.BLOCKS_KV.put(`block:${canvasId}:${id}`, JSON.stringify(record));
     return jsonResponse({ ok: true, id });
   }
 

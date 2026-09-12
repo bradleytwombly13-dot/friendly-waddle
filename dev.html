@@ -81,10 +81,26 @@
 <div id="layout">
   <div id="canvasCol">
     <div id="canvasWrap"><canvas id="c"></canvas></div>
-    <div id="topbar">DEV MODE &nbsp;·&nbsp; <b id="claimedCount">0</b> px claimed</div>
+    <div id="topbar">DEV MODE &nbsp;·&nbsp; <b id="adminCanvasName">...</b> &nbsp;·&nbsp; <b id="claimedCount">0</b> px claimed &nbsp;·&nbsp; <a href="/" style="color:inherit;">All canvases</a> &nbsp;·&nbsp; <select id="canvasSwitcher" style="font-size:11px;"></select></div>
     <div id="zoomHint">scroll to zoom · drag to pan · drag on grid to select a block</div>
   </div>
   <div id="panel">
+    <h2>Manage canvases</h2>
+    <div class="section">
+      <div class="field"><label>New canvas name</label><input type="text" id="newCanvasName" placeholder="e.g. Wide Banner"></div>
+      <div class="field"><label>Description</label><textarea id="newCanvasDesc"></textarea></div>
+      <div style="display:flex;gap:8px;">
+        <div class="field" style="flex:1;"><label>Width (px)</label><input type="number" id="newCanvasWidth" value="10000" min="50" max="20000"></div>
+        <div class="field" style="flex:1;"><label>Height (px)</label><input type="number" id="newCanvasHeight" value="10000" min="50" max="20000"></div>
+      </div>
+      <div style="font-size:11px;color:#7A7F84;margin-bottom:8px;">Any aspect ratio, up to 20,000px per side.</div>
+      <button class="primary" id="createCanvasBtn">Create canvas</button>
+      <div style="font-size:11px;color:#C4451F;margin-top:10px;display:none;" id="createCanvasErr"></div>
+    </div>
+    <div class="section" style="border-bottom:none;padding-bottom:6px;">
+      <button id="deleteCanvasBtn" style="width:100%;padding:8px;background:transparent;border:1px solid #C4451F;color:#C4451F;border-radius:2px;font-weight:700;font-size:12px;cursor:pointer;">Delete this canvas entirely</button>
+      <div style="font-size:11px;color:#7A7F84;margin-top:6px;">Permanently removes this canvas and every block on it. Can't be undone.</div>
+    </div>
     <h2>Direct add</h2>
     <div class="section">
       <div class="field"><label>Selection</label><div class="mono" id="selDims" style="font-size:13px;">Drag on canvas to select</div></div>
@@ -119,7 +135,9 @@
 </div>
 
 <script>
-const GRID = 1, CANVAS_SIZE = 10000;
+const GRID = 1;
+const CANVAS_ID = new URLSearchParams(location.search).get('id') || 'original-100m';
+let CANVAS_W = 10000, CANVAS_H = 10000;
 let PW = sessionStorage.getItem('mdd_admin_pw') || '';
 let allBlocks = [];
 let scale = 1, offsetX = 0, offsetY = 0;
@@ -147,9 +165,9 @@ const ctx = canvas.getContext('2d');
 const imageCache = new Map();
 
 function fitToView(){
-  scale = Math.min(canvas.width, canvas.height) / CANVAS_SIZE * 0.92;
-  offsetX = (canvas.width - CANVAS_SIZE*scale) / 2;
-  offsetY = (canvas.height - CANVAS_SIZE*scale) / 2;
+  scale = Math.min(canvas.width / CANVAS_W, canvas.height / CANVAS_H) * 0.92;
+  offsetX = (canvas.width - CANVAS_W*scale) / 2;
+  offsetY = (canvas.height - CANVAS_H*scale) / 2;
   requestRedraw();
 }
 function resizeCanvas(){ canvas.width = wrap.clientWidth; canvas.height = wrap.clientHeight; if(!hasInteracted) fitToView(); requestRedraw(); }
@@ -157,16 +175,16 @@ window.addEventListener('resize', resizeCanvas);
 
 function draw(){
   ctx.fillStyle = '#090B0D'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  const [cx0,cy0] = toScreen(0,0), [cx1,cy1] = toScreen(CANVAS_SIZE,CANVAS_SIZE);
+  const [cx0,cy0] = toScreen(0,0), [cx1,cy1] = toScreen(CANVAS_W,CANVAS_H);
   ctx.fillStyle = '#20262C'; ctx.fillRect(cx0,cy0,cx1-cx0,cy1-cy0);
   if(gridStep()){
     const step = gridStep();
     ctx.strokeStyle = '#262D34'; ctx.lineWidth=1;
-    for(let gx=0; gx<=CANVAS_SIZE; gx+=step){
+    for(let gx=0; gx<=CANVAS_W; gx+=step){
       const [sx]=toScreen(gx,0); if(sx<0||sx>canvas.width) continue;
       ctx.beginPath(); ctx.moveTo(sx,Math.max(cy0,0)); ctx.lineTo(sx,Math.min(cy1,canvas.height)); ctx.stroke();
     }
-    for(let gy=0; gy<=CANVAS_SIZE; gy+=step){
+    for(let gy=0; gy<=CANVAS_H; gy+=step){
       const [,sy]=toScreen(0,gy); if(sy<0||sy>canvas.height) continue;
       ctx.beginPath(); ctx.moveTo(Math.max(cx0,0),sy); ctx.lineTo(Math.min(cx1,canvas.width),sy); ctx.stroke();
     }
@@ -208,7 +226,7 @@ wrap.addEventListener('wheel',(e)=>{
 wrap.addEventListener('mousedown',(e)=>{
   const rect=wrap.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
   const [lx,ly]=toLogical(mx,my);
-  if(lx>=0&&lx<=CANVAS_SIZE&&ly>=0&&ly<=CANVAS_SIZE){
+  if(lx>=0&&lx<=CANVAS_W&&ly>=0&&ly<=CANVAS_H){
     isSelecting=true; selStart={x:snap(lx),y:snap(ly)}; selRect={x:selStart.x,y:selStart.y,w:0,h:0};
   } else { isPanning=true; hasInteracted=true; panStart={mx,my,offsetX,offsetY}; }
   requestRedraw();
@@ -218,7 +236,7 @@ window.addEventListener('mousemove',(e)=>{
   if(isPanning&&panStart){ offsetX=panStart.offsetX+(mx-panStart.mx); offsetY=panStart.offsetY+(my-panStart.my); requestRedraw(); }
   else if(isSelecting&&selStart){
     const [lx,ly]=toLogical(mx,my);
-    const cx=Math.min(CANVAS_SIZE,Math.max(0,snap(lx))), cy=Math.min(CANVAS_SIZE,Math.max(0,snap(ly)));
+    const cx=Math.min(CANVAS_W,Math.max(0,snap(lx))), cy=Math.min(CANVAS_H,Math.max(0,snap(ly)));
     selRect={x:Math.min(selStart.x,cx),y:Math.min(selStart.y,cy),w:Math.abs(cx-selStart.x),h:Math.abs(cy-selStart.y)};
     document.getElementById('selDims').textContent = selRect.w&&selRect.h ? `${selRect.w} × ${selRect.h} px` : 'Drag on canvas to select';
     document.getElementById('addBtn').disabled = !(selRect.w&&selRect.h);
@@ -230,7 +248,7 @@ window.addEventListener('mouseup',()=>{
   if(isSelecting){
     isSelecting=false;
     if(selRect && selRect.w===0 && selRect.h===0){
-      selRect = { x: Math.min(selRect.x, CANVAS_SIZE-GRID), y: Math.min(selRect.y, CANVAS_SIZE-GRID), w: GRID, h: GRID };
+      selRect = { x: Math.min(selRect.x, CANVAS_W-GRID), y: Math.min(selRect.y, CANVAS_H-GRID), w: GRID, h: GRID };
     }
     document.getElementById('selDims').textContent = selRect&&selRect.w&&selRect.h ? `${selRect.w} × ${selRect.h} px` : 'Drag on canvas to select';
     document.getElementById('addBtn').disabled = !(selRect&&selRect.w&&selRect.h);
@@ -359,7 +377,7 @@ document.getElementById('addBtn').onclick = async ()=>{
   const btn=document.getElementById('addBtn');
   btn.disabled=true; btn.textContent='Adding…';
   try{
-    const res=await fetch('/api/admin',{
+    const res=await fetch(`/api/canvases/${CANVAS_ID}/admin`,{
       method:'POST', headers:{'Content-Type':'application/json','x-admin-password':PW},
       body:JSON.stringify({action:'direct-add', x:selRect.x,y:selRect.y,w:selRect.w,h:selRect.h,
         image:exportPaintImage(), url:document.getElementById('urlInput').value.trim(),
@@ -375,9 +393,16 @@ function escapeHtml(s){
 }
 
 async function loadAll(){
-  const res = await fetch('/api/admin', {headers:{'x-admin-password':PW}});
+  const res = await fetch(`/api/canvases/${CANVAS_ID}/admin`, {headers:{'x-admin-password':PW}});
   if(res.status===401){ showGate(true); return; }
+  if(res.status===404){ document.getElementById('boughtList').innerHTML = '<div style="font-size:12px;color:#C4451F;">Canvas not found — check ?id= in the URL.</div>'; return; }
   const data = await res.json();
+  if(data.canvas){
+    CANVAS_W = data.canvas.width; CANVAS_H = data.canvas.height;
+    const nameEl = document.getElementById('adminCanvasName');
+    if(nameEl) nameEl.textContent = data.canvas.name;
+    fitToView();
+  }
   allBlocks = data.blocks || [];
   let claimedPx=0;
   const list = document.getElementById('boughtList');
@@ -406,7 +431,7 @@ async function loadAll(){
 }
 
 async function actOn(id, action){
-  await fetch('/api/admin',{
+  await fetch(`/api/canvases/${CANVAS_ID}/admin`,{
     method:'POST', headers:{'Content-Type':'application/json','x-admin-password':PW},
     body:JSON.stringify({action, id})
   });
@@ -415,7 +440,7 @@ async function actOn(id, action){
 
 document.getElementById('resetBtn').onclick = async ()=>{
   if(!confirm(`Delete all ${allBlocks.length} claimed blocks? This can't be undone.`)) return;
-  await fetch('/api/admin',{
+  await fetch(`/api/canvases/${CANVAS_ID}/admin`,{
     method:'POST', headers:{'Content-Type':'application/json','x-admin-password':PW},
     body:JSON.stringify({action:'reset-all'})
   });
@@ -427,14 +452,13 @@ document.getElementById('exportBtn').onclick = async ()=>{
   const originalText = btn.textContent;
   btn.disabled = true;
   try{
-    const CANVAS_SIZE = 10000;
     btn.textContent = 'Rendering...';
     const out = document.createElement('canvas');
-    out.width = CANVAS_SIZE; out.height = CANVAS_SIZE;
+    out.width = CANVAS_W; out.height = CANVAS_H;
     const octx = out.getContext('2d');
     octx.imageSmoothingEnabled = false;
     octx.fillStyle = '#ffffff';
-    octx.fillRect(0,0,CANVAS_SIZE,CANVAS_SIZE);
+    octx.fillRect(0,0,CANVAS_W,CANVAS_H);
     let done = 0;
     for(const b of allBlocks){
       if(b.image){
@@ -453,7 +477,7 @@ document.getElementById('exportBtn').onclick = async ()=>{
       if(!blob){ alert('Export failed — canvas may be too large for this browser/device.'); btn.disabled=false; btn.textContent=originalText; return; }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'pixel-canvas-export.png';
+      a.href = url; a.download = `${CANVAS_ID}-export.png`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
       btn.disabled = false; btn.textContent = originalText;
@@ -472,7 +496,7 @@ function showGate(err){
 
 document.getElementById('pwBtn').onclick = async ()=>{
   PW = document.getElementById('pwInput').value;
-  const res = await fetch('/api/admin', {headers:{'x-admin-password':PW}});
+  const res = await fetch(`/api/canvases/${CANVAS_ID}/admin`, {headers:{'x-admin-password':PW}});
   if(res.ok){
     sessionStorage.setItem('mdd_admin_pw', PW);
     document.getElementById('gate').style.display='none';
@@ -483,10 +507,71 @@ document.getElementById('pwBtn').onclick = async ()=>{
   }
 };
 
+// populate the canvas switcher dropdown
+(async ()=>{
+  try{
+    const res = await fetch('/api/canvases');
+    const data = await res.json();
+    const sel = document.getElementById('canvasSwitcher');
+    sel.innerHTML = '';
+    for(const c of (data.canvases||[])){
+      const opt = document.createElement('option');
+      opt.value = c.id; opt.textContent = c.name;
+      if(c.id === CANVAS_ID) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.onchange = ()=>{ location.href = `/dev.html?id=${encodeURIComponent(sel.value)}`; };
+  }catch(e){ /* switcher is a nicety, fine if it fails */ }
+})();
+
+document.getElementById('createCanvasBtn').onclick = async ()=>{
+  const name = document.getElementById('newCanvasName').value.trim();
+  const description = document.getElementById('newCanvasDesc').value.trim();
+  const width = parseInt(document.getElementById('newCanvasWidth').value, 10);
+  const height = parseInt(document.getElementById('newCanvasHeight').value, 10);
+  const errEl = document.getElementById('createCanvasErr');
+  errEl.style.display = 'none';
+  if(!name){ errEl.textContent = 'Name is required.'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('createCanvasBtn');
+  btn.disabled = true; btn.textContent = 'Creating...';
+  try{
+    const res = await fetch('/api/canvases', {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'x-admin-password':PW},
+      body: JSON.stringify({ name, description, width, height })
+    });
+    const data = await res.json();
+    if(!res.ok){ errEl.textContent = data.error || 'Something went wrong.'; errEl.style.display='block'; return; }
+    location.href = `/dev.html?id=${encodeURIComponent(data.canvas.id)}`;
+  }catch(e){
+    errEl.textContent = 'Could not reach the server.'; errEl.style.display='block';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Create canvas';
+  }
+};
+
+document.getElementById('deleteCanvasBtn').onclick = async ()=>{
+  const name = document.getElementById('adminCanvasName').textContent;
+  if(!confirm(`Permanently delete "${name}" and every block on it? This can't be undone.`)) return;
+  if(!confirm('Really sure? Last chance to cancel.')) return;
+  try{
+    const res = await fetch(`/api/canvases/${CANVAS_ID}`, {
+      method:'DELETE', headers:{'x-admin-password':PW}
+    });
+    if(res.ok){
+      alert('Canvas deleted.');
+      location.href = '/';
+    } else {
+      const data = await res.json().catch(()=>({}));
+      alert(data.error || 'Could not delete canvas.');
+    }
+  }catch(e){ alert('Could not reach the server.'); }
+};
+
 // try stored password on load
 (async ()=>{
   if(PW){
-    const res = await fetch('/api/admin', {headers:{'x-admin-password':PW}});
+    const res = await fetch(`/api/canvases/${CANVAS_ID}/admin`, {headers:{'x-admin-password':PW}});
     if(res.ok){
       document.getElementById('gate').style.display='none';
       document.getElementById('app').style.display='block';
