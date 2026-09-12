@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dev — The Pixel Canvas</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#14181C; --paper:#EDEAE0; --paper-2:#E2DECE; --marker:#E4572E;
+    --marker-dark:#C4451F; --text-light:#ECEAE3; --text-dim:#8B9299; --text-dark:#1B1F23;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--text-light);font-family:'Public Sans',sans-serif;overflow:hidden;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  #gate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--ink);z-index:100;}
+  #gate .box{background:var(--paper);color:var(--text-dark);padding:26px;border-radius:3px;border-top:4px solid var(--marker);width:300px;}
+  #gate input{width:100%;padding:9px 10px;border:1px solid #C7C2B2;border-radius:2px;font-size:14px;margin:10px 0;}
+  #gate button{width:100%;padding:10px;background:var(--marker);color:#fff;border:none;border-radius:2px;font-weight:600;cursor:pointer;}
+  #gate .err{color:var(--marker-dark);font-size:12px;display:none;}
+
+  #app{display:none;height:100%;}
+  #layout{display:flex;height:100%;}
+  #canvasCol{flex:1;position:relative;}
+  #canvasWrap{position:absolute;inset:0;cursor:crosshair;}
+  canvas{display:block;}
+  #panel{width:340px;background:var(--paper);color:var(--text-dark);overflow-y:auto;border-left:1px solid #C7C2B2;}
+  #panel h2{font-size:14px;text-transform:none;margin:0;padding:14px 16px;border-bottom:1px solid #D9D4C2;background:var(--paper-2);}
+  .section{padding:14px 16px;border-bottom:1px solid #D9D4C2;}
+  .section h3{font-size:12px;font-weight:700;margin:0 0 10px;color:#4A4F55;}
+  .field{margin-bottom:10px;}
+  .field label{display:block;font-size:11px;font-weight:600;margin-bottom:4px;color:#4A4F55;}
+  .field input, .field textarea{width:100%;padding:7px 8px;border:1px solid #C7C2B2;border-radius:2px;font-size:13px;font-family:'Public Sans',sans-serif;}
+  .field textarea{min-height:44px;resize:vertical;}
+  button.primary{background:var(--marker);color:#fff;border:none;border-radius:2px;padding:9px 12px;font-weight:600;cursor:pointer;font-size:13px;width:100%;}
+  button.primary:hover{background:var(--marker-dark);}
+  button.primary:disabled{opacity:0.5;cursor:default;}
+  .claim{border:1px solid #D9D4C2;border-radius:3px;padding:10px;margin-bottom:10px;background:#fff;}
+  .claim .meta{font-size:11px;color:#7A7F84;margin-bottom:6px;}
+  .claim img{width:100%;image-rendering:pixelated;border:1px solid #E2DECE;margin-bottom:6px;}
+  .claim .row{display:flex;gap:6px;}
+  .claim .row button{flex:1;padding:7px;border:none;border-radius:2px;font-size:12px;font-weight:600;cursor:pointer;}
+  .approve{background:#2E7D32;color:#fff;}
+  .reject{background:#8A8F94;color:#fff;}
+  #paintToolbar{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+  #paintToolbar input[type=color]{width:36px;height:28px;padding:2px;border:1px solid #C7C2B2;border-radius:2px;cursor:pointer;}
+  #paintToolbar button{font-family:'Public Sans',sans-serif;font-size:11px;font-weight:600;background:#fff;border:1px solid #C7C2B2;border-radius:2px;padding:5px 8px;cursor:pointer;color:var(--text-dark);}
+  #paintToolbar button:hover{background:var(--paper-2);}
+  #paintViewport{
+    position:relative;width:100%;height:180px;border:1px solid #C7C2B2;border-radius:2px;overflow:hidden;cursor:crosshair;
+    background-image:linear-gradient(45deg,#eee 25%,transparent 25%),linear-gradient(-45deg,#eee 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#eee 75%),linear-gradient(-45deg,transparent 75%,#eee 75%);
+    background-size:16px 16px; background-position:0 0,0 8px,8px -8px,-8px 0;
+  }
+  #paintDisplay{display:block;width:100%;height:100%;}
+  #zoomHint{position:absolute;left:14px;bottom:14px;font-size:11px;color:var(--text-dim);z-index:5;}
+  #topbar{position:absolute;top:0;left:0;right:0;padding:12px 16px;font-size:13px;color:var(--text-dim);z-index:5;background:linear-gradient(to bottom, rgba(20,24,28,0.9), rgba(20,24,28,0));}
+  #topbar b{color:var(--text-light);}
+
+  @media (max-width: 800px){
+    #layout{flex-direction:column;}
+    #canvasCol{height:50vh;flex:none;}
+    #panel{width:100%;height:50vh;border-left:none;border-top:1px solid #C7C2B2;}
+    #topbar{font-size:11px;padding:8px 10px;}
+    #zoomHint{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div style="font-weight:700;font-size:15px;margin-bottom:4px;">Dev access</div>
+    <div style="font-size:12px;color:#5A5F65;">Enter the admin password.</div>
+    <input type="password" id="pwInput" placeholder="Password">
+    <div class="err" id="pwErr">Wrong password.</div>
+    <button id="pwBtn">Enter</button>
+  </div>
+</div>
+
+<div id="app">
+<div id="layout">
+  <div id="canvasCol">
+    <div id="canvasWrap"><canvas id="c"></canvas></div>
+    <div id="topbar">DEV MODE &nbsp;·&nbsp; <b id="claimedCount">0</b> px claimed</div>
+    <div id="zoomHint">scroll to zoom · drag to pan · drag on grid to select a block</div>
+  </div>
+  <div id="panel">
+    <h2>Direct add</h2>
+    <div class="section">
+      <div class="field"><label>Selection</label><div class="mono" id="selDims" style="font-size:13px;">Drag on canvas to select</div></div>
+      <div class="field"><label>Draw <span class="mono" id="paintDimsLabel" style="font-weight:400;font-size:11px;"></span></label>
+        <div id="paintToolbar">
+          <input type="color" id="colorInput" value="#E4572E">
+          <button type="button" id="fillAllBtn">Fill all</button>
+          <button type="button" id="clearPaintBtn">Clear</button>
+          <button type="button" id="convertImgBtn" style="display:none;">Convert image</button>
+          <input type="file" id="paintImgInput" accept="image/*" style="display:none;">
+          <button type="button" id="paintZoomOut" title="Zoom out">−</button>
+          <button type="button" id="paintZoomFit" title="Fit view">⤢</button>
+          <button type="button" id="paintZoomIn" title="Zoom in">+</button>
+        </div>
+        <div id="paintViewport"><canvas id="paintDisplay"></canvas></div>
+      </div>
+      <div class="field"><label>Link</label><input type="url" id="urlInput" placeholder="https://"></div>
+      <div class="field"><label>Tagline</label><textarea id="taglineInput"></textarea></div>
+      <button class="primary" id="addBtn" disabled>Add block directly</button>
+    </div>
+    <h2>Claimed blocks <span class="mono" style="font-weight:400;font-size:11px;color:#7A7F84;" id="boughtCount"></span></h2>
+    <div class="section" style="border-bottom:none;padding-bottom:6px;">
+      <button id="resetBtn" style="width:100%;padding:8px;background:transparent;border:1px solid #C7573F;color:#C4451F;border-radius:2px;font-weight:600;font-size:12px;cursor:pointer;">Reset everything</button>
+      <div style="font-size:11px;color:#7A7F84;margin-top:6px;">Every claim goes live immediately, first come first served. Use this to wipe the canvas and start over.</div>
+    </div>
+    <div class="section" id="boughtList">
+      <div style="font-size:12px;color:#7A7F84;">Nothing claimed yet.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+const GRID = 1, CANVAS_SIZE = 10000;
+let PW = sessionStorage.getItem('mdd_admin_pw') || '';
+let allBlocks = [];
+let scale = 1, offsetX = 0, offsetY = 0;
+let isPanning=false, panStart=null, isSelecting=false, selStart=null, selRect=null;
+let hasInteracted = false;
+let needsRedraw = true;
+function requestRedraw(){ needsRedraw = true; }
+
+function toScreen(x,y){ return [x*scale+offsetX, y*scale+offsetY]; }
+function toLogical(sx,sy){ return [(sx-offsetX)/scale, (sy-offsetY)/scale]; }
+function snap(v){ return Math.round(v/GRID)*GRID; }
+
+function gridStep(){
+  const levels = [1,10,100,1000];
+  const minSpacing = 40;
+  for(const lvl of levels){
+    if(lvl*scale >= minSpacing) return lvl;
+  }
+  return null;
+}
+
+const wrap = document.getElementById('canvasWrap');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const imageCache = new Map();
+
+function fitToView(){
+  scale = Math.min(canvas.width, canvas.height) / CANVAS_SIZE * 0.92;
+  offsetX = (canvas.width - CANVAS_SIZE*scale) / 2;
+  offsetY = (canvas.height - CANVAS_SIZE*scale) / 2;
+  requestRedraw();
+}
+function resizeCanvas(){ canvas.width = wrap.clientWidth; canvas.height = wrap.clientHeight; if(!hasInteracted) fitToView(); requestRedraw(); }
+window.addEventListener('resize', resizeCanvas);
+
+function draw(){
+  ctx.fillStyle = '#090B0D'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const [cx0,cy0] = toScreen(0,0), [cx1,cy1] = toScreen(CANVAS_SIZE,CANVAS_SIZE);
+  ctx.fillStyle = '#20262C'; ctx.fillRect(cx0,cy0,cx1-cx0,cy1-cy0);
+  if(gridStep()){
+    const step = gridStep();
+    ctx.strokeStyle = '#262D34'; ctx.lineWidth=1;
+    for(let gx=0; gx<=CANVAS_SIZE; gx+=step){
+      const [sx]=toScreen(gx,0); if(sx<0||sx>canvas.width) continue;
+      ctx.beginPath(); ctx.moveTo(sx,Math.max(cy0,0)); ctx.lineTo(sx,Math.min(cy1,canvas.height)); ctx.stroke();
+    }
+    for(let gy=0; gy<=CANVAS_SIZE; gy+=step){
+      const [,sy]=toScreen(0,gy); if(sy<0||sy>canvas.height) continue;
+      ctx.beginPath(); ctx.moveTo(Math.max(cx0,0),sy); ctx.lineTo(Math.min(cx1,canvas.width),sy); ctx.stroke();
+    }
+  }
+  ctx.strokeStyle='#3A4148'; ctx.lineWidth=2; ctx.strokeRect(cx0,cy0,cx1-cx0,cy1-cy0);
+
+  for(const b of allBlocks){
+    const [sx,sy]=toScreen(b.x,b.y), [ex,ey]=toScreen(b.x+b.w,b.y+b.h);
+    if(b.image){
+      let img = imageCache.get(b.id);
+      if(!img){ img=new Image(); img.onload=requestRedraw; img.src=b.image; imageCache.set(b.id,img); }
+      if(img.complete) ctx.drawImage(img,sx,sy,ex-sx,ey-sy);
+    } else {
+      ctx.fillStyle = '#E4572E';
+      ctx.fillRect(sx,sy,ex-sx,ey-sy);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
+    ctx.strokeRect(sx+0.5, sy+0.5, Math.max(0,ex-sx-1), Math.max(0,ey-sy-1));
+  }
+  if(selRect){
+    const [sx,sy]=toScreen(selRect.x,selRect.y), [ex,ey]=toScreen(selRect.x+selRect.w,selRect.y+selRect.h);
+    ctx.fillStyle='rgba(228,87,46,0.25)'; ctx.fillRect(sx,sy,ex-sx,ey-sy);
+    ctx.strokeStyle='#E4572E'; ctx.lineWidth=2; ctx.strokeRect(sx,sy,ex-sx,ey-sy);
+  }
+}
+function loop(){ if(needsRedraw){ draw(); needsRedraw=false; } requestAnimationFrame(loop); }
+
+wrap.addEventListener('wheel',(e)=>{
+  e.preventDefault();
+  hasInteracted = true;
+  const rect=wrap.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const [lx,ly]=toLogical(mx,my);
+  scale = Math.min(6, Math.max(0.02, scale*(e.deltaY<0?1.15:0.87)));
+  const [nsx,nsy]=toScreen(lx,ly);
+  offsetX += mx-nsx; offsetY += my-nsy;
+  requestRedraw();
+},{passive:false});
+
+wrap.addEventListener('mousedown',(e)=>{
+  const rect=wrap.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const [lx,ly]=toLogical(mx,my);
+  if(lx>=0&&lx<=CANVAS_SIZE&&ly>=0&&ly<=CANVAS_SIZE){
+    isSelecting=true; selStart={x:snap(lx),y:snap(ly)}; selRect={x:selStart.x,y:selStart.y,w:0,h:0};
+  } else { isPanning=true; hasInteracted=true; panStart={mx,my,offsetX,offsetY}; }
+  requestRedraw();
+});
+window.addEventListener('mousemove',(e)=>{
+  const rect=wrap.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  if(isPanning&&panStart){ offsetX=panStart.offsetX+(mx-panStart.mx); offsetY=panStart.offsetY+(my-panStart.my); requestRedraw(); }
+  else if(isSelecting&&selStart){
+    const [lx,ly]=toLogical(mx,my);
+    const cx=Math.min(CANVAS_SIZE,Math.max(0,snap(lx))), cy=Math.min(CANVAS_SIZE,Math.max(0,snap(ly)));
+    selRect={x:Math.min(selStart.x,cx),y:Math.min(selStart.y,cy),w:Math.abs(cx-selStart.x),h:Math.abs(cy-selStart.y)};
+    document.getElementById('selDims').textContent = selRect.w&&selRect.h ? `${selRect.w} × ${selRect.h} px` : 'Drag on canvas to select';
+    document.getElementById('addBtn').disabled = !(selRect.w&&selRect.h);
+    requestRedraw();
+  }
+});
+window.addEventListener('mouseup',()=>{
+  isPanning=false; panStart=null;
+  if(isSelecting){
+    isSelecting=false;
+    if(selRect && selRect.w===0 && selRect.h===0){
+      selRect = { x: Math.min(selRect.x, CANVAS_SIZE-GRID), y: Math.min(selRect.y, CANVAS_SIZE-GRID), w: GRID, h: GRID };
+    }
+    document.getElementById('selDims').textContent = selRect&&selRect.w&&selRect.h ? `${selRect.w} × ${selRect.h} px` : 'Drag on canvas to select';
+    document.getElementById('addBtn').disabled = !(selRect&&selRect.w&&selRect.h);
+    if(selRect && selRect.w && selRect.h) initPaint(selRect.w, selRect.h);
+  }
+  requestRedraw();
+});
+
+// ---- paint editor ----
+const paintViewport = document.getElementById('paintViewport');
+const paintDisplay = document.getElementById('paintDisplay');
+const paintDisplayCtx = paintDisplay.getContext('2d');
+const sourceCanvas = document.createElement('canvas');
+const sourceCtx = sourceCanvas.getContext('2d');
+
+let paintW=0, paintH=0, paintScale=1, paintOffsetX=0, paintOffsetY=0;
+let paintMode2 = null, paintPanStart2 = null, paintLoopRunning2 = false;
+
+function initPaint(w,h){
+  paintW=w; paintH=h;
+  sourceCanvas.width=w; sourceCanvas.height=h;
+  sourceCtx.fillStyle='#FFFFFF'; sourceCtx.fillRect(0,0,w,h);
+  document.getElementById('paintDimsLabel').textContent = `(${w} × ${h}px)`;
+  document.getElementById('convertImgBtn').style.display = (w>10||h>10) ? 'inline-block' : 'none';
+  fitPaintView();
+  startPaintLoop();
+}
+function fitPaintView(){
+  paintDisplay.width = paintViewport.clientWidth;
+  paintDisplay.height = paintViewport.clientHeight;
+  const vw=paintDisplay.width, vh=paintDisplay.height;
+  paintScale = Math.max(0.1, Math.min(60, Math.min(vw/paintW, vh/paintH)*0.9));
+  paintOffsetX = (vw-paintW*paintScale)/2;
+  paintOffsetY = (vh-paintH*paintScale)/2;
+}
+function paintToLogical(clientX, clientY){
+  const rect = paintViewport.getBoundingClientRect();
+  return [(clientX-rect.left-paintOffsetX)/paintScale, (clientY-rect.top-paintOffsetY)/paintScale];
+}
+function renderPaintDisplay(){
+  if(paintDisplay.width!==paintViewport.clientWidth) paintDisplay.width=paintViewport.clientWidth;
+  if(paintDisplay.height!==paintViewport.clientHeight) paintDisplay.height=paintViewport.clientHeight;
+  paintDisplayCtx.clearRect(0,0,paintDisplay.width,paintDisplay.height);
+  paintDisplayCtx.imageSmoothingEnabled = false;
+  paintDisplayCtx.drawImage(sourceCanvas, 0,0,paintW,paintH, paintOffsetX,paintOffsetY, paintW*paintScale, paintH*paintScale);
+  if(paintScale>=6){
+    paintDisplayCtx.strokeStyle='rgba(0,0,0,0.08)'; paintDisplayCtx.lineWidth=1;
+    for(let px=0; px<=paintW; px++){ const sx=px*paintScale+paintOffsetX; paintDisplayCtx.beginPath(); paintDisplayCtx.moveTo(sx+0.5,paintOffsetY); paintDisplayCtx.lineTo(sx+0.5,paintOffsetY+paintH*paintScale); paintDisplayCtx.stroke(); }
+    for(let py=0; py<=paintH; py++){ const sy=py*paintScale+paintOffsetY; paintDisplayCtx.beginPath(); paintDisplayCtx.moveTo(paintOffsetX,sy+0.5); paintDisplayCtx.lineTo(paintOffsetX+paintW*paintScale,sy+0.5); paintDisplayCtx.stroke(); }
+  }
+  paintDisplayCtx.strokeStyle='#8A8F94'; paintDisplayCtx.lineWidth=1.5;
+  paintDisplayCtx.strokeRect(paintOffsetX,paintOffsetY,paintW*paintScale,paintH*paintScale);
+}
+function paintLoop2(){ if(!paintLoopRunning2) return; renderPaintDisplay(); requestAnimationFrame(paintLoop2); }
+function startPaintLoop(){ if(!paintLoopRunning2){ paintLoopRunning2=true; requestAnimationFrame(paintLoop2); } }
+function stopPaintLoop(){ paintLoopRunning2=false; }
+
+function paintPixel(px,py){ sourceCtx.fillStyle=document.getElementById('colorInput').value; sourceCtx.fillRect(px,py,1,1); }
+
+paintViewport.addEventListener('mousedown',(e)=>{
+  const [lx,ly]=paintToLogical(e.clientX,e.clientY);
+  const px=Math.floor(lx), py=Math.floor(ly);
+  if(px>=0&&py>=0&&px<paintW&&py<paintH){ paintMode2='paint'; paintPixel(px,py); }
+  else { paintMode2='pan'; paintPanStart2={x:e.clientX,y:e.clientY,offX:paintOffsetX,offY:paintOffsetY}; }
+});
+window.addEventListener('mousemove',(e)=>{
+  if(paintMode2==='paint'){
+    const [lx,ly]=paintToLogical(e.clientX,e.clientY);
+    const px=Math.floor(lx), py=Math.floor(ly);
+    if(px>=0&&py>=0&&px<paintW&&py<paintH) paintPixel(px,py);
+  } else if(paintMode2==='pan' && paintPanStart2){
+    paintOffsetX = paintPanStart2.offX + (e.clientX-paintPanStart2.x);
+    paintOffsetY = paintPanStart2.offY + (e.clientY-paintPanStart2.y);
+  }
+});
+window.addEventListener('mouseup',()=>{ paintMode2=null; paintPanStart2=null; });
+paintViewport.addEventListener('wheel',(e)=>{
+  e.preventDefault();
+  const rect=paintViewport.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  const lx=(mx-paintOffsetX)/paintScale, ly=(my-paintOffsetY)/paintScale;
+  paintScale = Math.max(0.1, Math.min(80, paintScale*(e.deltaY<0?1.15:0.87)));
+  paintOffsetX = mx-lx*paintScale;
+  paintOffsetY = my-ly*paintScale;
+}, {passive:false});
+function paintZoomBy(factor){
+  const cx=paintDisplay.width/2, cy=paintDisplay.height/2;
+  const lx=(cx-paintOffsetX)/paintScale, ly=(cy-paintOffsetY)/paintScale;
+  paintScale = Math.max(0.1, Math.min(80, paintScale*factor));
+  paintOffsetX = cx-lx*paintScale;
+  paintOffsetY = cy-ly*paintScale;
+}
+document.getElementById('paintZoomIn').onclick = ()=> paintZoomBy(1.3);
+document.getElementById('paintZoomOut').onclick = ()=> paintZoomBy(0.77);
+document.getElementById('paintZoomFit').onclick = ()=> fitPaintView();
+
+document.getElementById('fillAllBtn').onclick = ()=>{
+  sourceCtx.fillStyle=document.getElementById('colorInput').value;
+  sourceCtx.fillRect(0,0,paintW,paintH);
+};
+document.getElementById('clearPaintBtn').onclick = ()=>{
+  sourceCtx.fillStyle='#FFFFFF';
+  sourceCtx.fillRect(0,0,paintW,paintH);
+};
+document.getElementById('convertImgBtn').onclick = ()=> document.getElementById('paintImgInput').click();
+document.getElementById('paintImgInput').onchange = (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const img = new Image();
+  img.onload = ()=>{
+    const f = Math.max(paintW/img.width, paintH/img.height);
+    const dw = img.width*f, dh = img.height*f;
+    sourceCtx.imageSmoothingEnabled = true;
+    sourceCtx.imageSmoothingQuality = 'high';
+    sourceCtx.clearRect(0,0,paintW,paintH);
+    sourceCtx.drawImage(img, (paintW-dw)/2, (paintH-dh)/2, dw, dh);
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = '';
+};
+
+function exportPaintImage(){ return sourceCanvas.toDataURL('image/png'); }
+
+document.getElementById('addBtn').onclick = async ()=>{
+  if(!selRect) return;
+  const btn=document.getElementById('addBtn');
+  btn.disabled=true; btn.textContent='Adding…';
+  try{
+    const res=await fetch('/api/admin',{
+      method:'POST', headers:{'Content-Type':'application/json','x-admin-password':PW},
+      body:JSON.stringify({action:'direct-add', x:selRect.x,y:selRect.y,w:selRect.w,h:selRect.h,
+        image:exportPaintImage(), url:document.getElementById('urlInput').value.trim(),
+        tagline:document.getElementById('taglineInput').value.trim()})
+    });
+    if(res.ok){ selRect=null; document.getElementById('selDims').textContent='Drag on canvas to select'; await loadAll(); }
+    else alert('Failed to add block.');
+  } finally { btn.disabled=false; btn.textContent='Add block directly'; }
+};
+
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadAll(){
+  const res = await fetch('/api/admin', {headers:{'x-admin-password':PW}});
+  if(res.status===401){ showGate(true); return; }
+  const data = await res.json();
+  allBlocks = data.blocks || [];
+  let claimedPx=0;
+  const list = document.getElementById('boughtList');
+  list.innerHTML='';
+  if(allBlocks.length===0) list.innerHTML = '<div style="font-size:12px;color:#7A7F84;">Nothing claimed yet.</div>';
+  const sorted = [...allBlocks].sort((a,b)=> (b.createdAt||'').localeCompare(a.createdAt||''));
+  for(const b of sorted){
+    claimedPx += b.w*b.h;
+    const div=document.createElement('div'); div.className='claim';
+    // b.url/b.tagline/b.email/b.image are user-supplied — escape before inserting as HTML.
+    const safeUrl = escapeHtml(b.url || '(no link)');
+    const safeTagline = escapeHtml(b.tagline || '');
+    const safeEmail = b.email ? ('· ' + escapeHtml(b.email)) : '';
+    const safeImage = b.image ? escapeHtml(b.image) : '';
+    const safeId = escapeHtml(b.id);
+    div.innerHTML = `<div class="meta">${b.w}×${b.h}px at (${b.x},${b.y}) ${safeEmail}</div>
+      ${safeImage?`<img src="${safeImage}">`:''}
+      <div class="meta">${safeUrl} — ${safeTagline}</div>
+      <div class="row"><button class="reject" data-id="${safeId}">Delete</button></div>`;
+    list.appendChild(div);
+  }
+  list.querySelectorAll('.reject').forEach(btn=>btn.onclick=()=>actOn(btn.dataset.id,'delete'));
+  document.getElementById('claimedCount').textContent = claimedPx.toLocaleString();
+  document.getElementById('boughtCount').textContent = `(${allBlocks.length})`;
+  requestRedraw();
+}
+
+async function actOn(id, action){
+  await fetch('/api/admin',{
+    method:'POST', headers:{'Content-Type':'application/json','x-admin-password':PW},
+    body:JSON.stringify({action, id})
+  });
+  loadAll();
+}
+
+document.getElementById('resetBtn').onclick = async ()=>{
+  if(!confirm(`Delete all ${allBlocks.length} claimed blocks? This can't be undone.`)) return;
+  await fetch('/api/admin',{
+    method:'POST', headers:{'Content-Type':'application/json','x-admin-password':PW},
+    body:JSON.stringify({action:'reset-all'})
+  });
+  loadAll();
+};
+
+function showGate(err){
+  document.getElementById('gate').style.display='flex';
+  document.getElementById('app').style.display='none';
+  document.getElementById('pwErr').style.display = err ? 'block' : 'none';
+}
+
+document.getElementById('pwBtn').onclick = async ()=>{
+  PW = document.getElementById('pwInput').value;
+  const res = await fetch('/api/admin', {headers:{'x-admin-password':PW}});
+  if(res.ok){
+    sessionStorage.setItem('mdd_admin_pw', PW);
+    document.getElementById('gate').style.display='none';
+    document.getElementById('app').style.display='block';
+    resizeCanvas(); requestAnimationFrame(loop); loadAll();
+  } else {
+    document.getElementById('pwErr').style.display='block';
+  }
+};
+
+// try stored password on load
+(async ()=>{
+  if(PW){
+    const res = await fetch('/api/admin', {headers:{'x-admin-password':PW}});
+    if(res.ok){
+      document.getElementById('gate').style.display='none';
+      document.getElementById('app').style.display='block';
+      resizeCanvas(); requestAnimationFrame(loop); loadAll();
+      return;
+    }
+  }
+  showGate(false);
+})();
+</script>
+</body>
+</html>
